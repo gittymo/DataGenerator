@@ -55,6 +55,10 @@ app.MapGet("/getWords", (int count, int appCode) =>
     }
 
     var words = lgen.GenerateWords(count);
+
+    // Record the request in the client's request history
+    RecordRequestHistory(client, count, words);
+    UpdateClientsFile(clients, clientReg, clientUsage);
     return Results.Ok(words);
 })
 .WithName("GetWords");
@@ -76,6 +80,10 @@ app.MapGet("/getParagraphs", (int count, int appCode) =>
     }
 
     var paragraphs = lgen.GenerateParagraphs(count);
+
+    // Record the request in the client's request history
+    RecordRequestHistory(client, count * 5, [.. paragraphs.SelectMany(p => p.Split(' '))]);
+    UpdateClientsFile(clients, clientReg, clientUsage);
     return Results.Ok(paragraphs);
 })
 .WithName("GetParagraphs");
@@ -384,6 +392,24 @@ static int GetWebCode(string accountName, string email, string password)
     return BitConverter.ToInt32(hash, 0);
 }
 
+static void RecordRequestHistory(Client client, int tokensUsed, string[] words)
+{
+    // Break the firstWords into a list of strings. Remove any punctuation.
+    var firstWords = words.Take(5).ToList();
+
+    client.RequestHistory.Insert(0, new RequestHistoryEntry
+    {
+        RequestTime = DateTime.UtcNow,
+        TokensUsed = tokensUsed,
+        FirstWords = firstWords
+    });
+
+    // Keep only the last 10 entries
+    if (client.RequestHistory.Count > 10)
+    {
+        client.RequestHistory = client.RequestHistory.Take(10).ToList();
+    }
+}
 
 public record RegisterClientRequest
 {
@@ -402,6 +428,7 @@ public record RegisterClientConfirmation
 public record Client : RegisterClientRequest
 {
     public int AppCode { get; set; }
+    public List<RequestHistoryEntry> RequestHistory { get; set; } = [];
 }
 
 public record ClientRegistrationDetails : RegisterClientRequest
@@ -434,4 +461,11 @@ public record WebClientLogin
 {
     public required string AccountName { get; set; }
     public int WebCode { get; set; }
+}
+
+public record RequestHistoryEntry
+{
+    public DateTime RequestTime { get; set; }
+    public int TokensUsed { get; set; }
+    public List<string> FirstWords { get; set; } = [];
 }
