@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>Client Login</title>
+		<link rel="stylesheet" href="./global.css" />
+	</head>
+	<body>
+		<div id="login-container">
+			<h1>Data Generator</h1>
+			<h2>Client Login</h2>
+			<form id="login-form" action="/clientlogin" method="post">
+				<label for="username">Account name:</label>
+				<input type="text" id="username" name="username" required />
+				<label for="email">Account email:</label>
+				<input type="email" id="email" name="email" required />
+				<label for="password">Password:</label>
+				<input type="password" id="password" name="password" required />
+				<input type="submit" value="Login" />
+			</form>
+		</div>
+	</body>
+</html>
