@@ -3,6 +3,7 @@ using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using System.Security.Cryptography;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.FileProviders;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -30,6 +31,13 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
+
+// Serve static files from the "www" directory at the "/www" request path.
+app.UseStaticFiles(new StaticFileOptions
+{
+    FileProvider = new PhysicalFileProvider(Path.Combine(Directory.GetCurrentDirectory(), "www")),
+    RequestPath = "/www"
+});
 
 app.MapGet("/getWords", (int count, int appCode) =>
 {
@@ -226,6 +234,18 @@ app.MapPost("/webClientLoginAllowed", ([FromBody] WebClientLogin login) =>
     // If they match, return OK
     return Results.Ok("Login allowed.");
 }).WithName("WebClientLoginAllowed");
+
+// Add an endpoint that will open the clientlogin.html file in the browser
+app.MapGet("/clientLogin", () =>
+{
+    var filePath = Path.Combine(Directory.GetCurrentDirectory(), "www/clientlogin.html");
+    if (!System.IO.File.Exists(filePath))
+    {
+        return Results.NotFound("clientlogin.html file not found.");
+    }
+
+    return Results.File(filePath, "text/html");
+}).WithName("ClientLogin");
 
 app.Run();
 
