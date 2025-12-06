@@ -7,82 +7,133 @@ body {
 	align-items: center;
 	justify-content: center;
 	overflow: hidden;
+	font-family: Verdana, Geneva, Tahoma, sans-serif;
 }
-
-div#login-container {
+/* Container styling */
+div.container {
 	display: flex;
 	flex-direction: column;
-	align-items: center;
-	justify-content: center;
-	width: fit-content;
 	border: 2px solid black;
 	border-radius: 8px;
 	box-shadow: 4px 4px 8px rgba(0, 0, 0, 0.2);
 	background: linear-gradient(45deg, #aaccff, #6688ff);
 	padding: 16px;
 	margin: 0px;
+}
 
-	> h1 {
-		margin: 0px;
-		margin-bottom: 16px;
-		font-family: Arial, sans-serif;
-		color: #ffffff;
-		text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
-	}
+div.container > h1 {
+	margin: 0px;
+	margin-bottom: 16px;
+	font-family: Arial, sans-serif;
+	color: #ffffff;
+	text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+}
 
-	> h2 {
-		margin: 0px;
-		margin-bottom: 24px;
-		font-family: Arial, sans-serif;
-		color: #ffffff;
-		text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.2);
-	}
+div.container > h2 {
+	margin: 0px;
+	margin-bottom: 24px;
+	font-family: Arial, sans-serif;
+	color: #ffffff;
+	text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.2);
+}
 
-	> form#login-form {
-		display: flex;
-		flex-direction: column;
-		align-items: flex-start;
+/* Login container */
+div#login-container {
+	align-items: center;
+	justify-content: center;
+	width: fit-content;
+}
 
-		> label {
-			font-family: Arial, sans-serif;
-			color: #ffffff;
-			margin-bottom: 4px;
-			text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.2);
-		}
+div#login-container > form#login-form {
+	display: flex;
+	flex-direction: column;
+	align-items: flex-start;
+}
 
-		> input[type="text"],
-		> input[type="email"],
-		> input[type="password"] {
-			width: 250px;
-			padding: 8px;
-			margin-bottom: 16px;
-			border: 1px solid #cccccc;
-			border-radius: 4px;
-			font-size: 14px;
-		}
+div#login-container > form#login-form > label {
+	font-family: Arial, sans-serif;
+	color: #ffffff;
+	margin-bottom: 4px;
+	text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.2);
+}
 
-		> input[type="submit"] {
-			width: 100%;
-			padding: 10px;
-			background-color: #3366ff;
-			color: #ffffff;
-			border: none;
-			border-radius: 4px;
-			font-size: 16px;
-			cursor: pointer;
-			transition: background-color 0.3s ease;
-			margin-top: 8px;
-		}
+div#login-container > form#login-form > input[type="text"],
+div#login-container > form#login-form > input[type="email"],
+div#login-container > form#login-form > input[type="password"] {
+	width: 250px;
+	padding: 8px;
+	margin-bottom: 16px;
+	border: 1px solid #cccccc;
+	border-radius: 4px;
+	font-size: 14px;
+}
 
-		> input[type="submit"]:hover {
-			background-color: #254eda;
-		}
+div#login-container > form#login-form > input[type="submit"] {
+	width: 100%;
+	padding: 10px;
+	background-color: #3366ff;
+	color: #ffffff;
+	border: none;
+	border-radius: 4px;
+	font-size: 16px;
+	cursor: pointer;
+	transition: background-color 0.3s ease;
+	margin-top: 8px;
+}
 
-		> div#error-message {
-			color: #ff4444;
-			font-family: Arial, sans-serif;
-			margin-top: 8px;
-			display: none;
-		}
-	}
+div#login-container > form#login-form > input[type="submit"]:hover {
+	background-color: #254eda;
+}
+
+div#login-container > form#login-form > div#error-message {
+	color: #ff4444;
+	font-family: Arial, sans-serif;
+	margin-top: 8px;
+	display: none;
+}
+
+/* Client info block */
+div#ClientInfo {
+	margin-top: 16px;
+	display: flex;
+	flex-direction: column;
+	color: #ffffff;
+}
+
+div#ClientInfo > h1 {
+	margin: 0px !important;
+	margin-bottom: 16px !important;
+}
+
+div#ClientInfo > h2 {
+	margin-bottom: 0px !important;
+	font-weight: normal;
+}
+
+div#ClientInfo > h3 {
+	margin: 0 !important;
+	margin-top: 16px !important;
+	color: #ffffff;
+}
+
+div#ClientInfo > span {
+	margin-top: 8px;
+	font-family: Arial, sans-serif;
+	color: #ffffff;
+}
+
+div#ClientInfo > button {
+	margin-top: 16px;
+	padding: 10px 20px;
+	background-color: #ff3333;
+	color: #ffffff;
+	border: none;
+	border-radius: 4px;
+	font-size: 16px;
+	cursor: pointer;
+	transition: background-color 0.3s ease;
+}
+
+div#ClientInfo > button:hover {
+	background-color: #cc0000;
 }

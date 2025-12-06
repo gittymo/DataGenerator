@@ -21,6 +21,13 @@ const string masterIv = "7l++7FEGWs+tjCGxz8RGYQ==";
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
 builder.Services.AddOpenApi();
 
+// Keep .NET property names as-is (PascalCase) in JSON responses
+// so JavaScript clients receive `AccountName` instead of `accountName`.
+builder.Services.ConfigureHttpJsonOptions(opts =>
+{
+    opts.SerializerOptions.PropertyNamingPolicy = null;
+});
+
 var app = builder.Build();
 var lgen = new LipsumGenerator();
 
@@ -32,11 +39,11 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 
-// Serve static files from the "www" directory at the "/www" request path.
+// Serve static files from the "www" directory at the application root (no prefix).
 app.UseStaticFiles(new StaticFileOptions
 {
     FileProvider = new PhysicalFileProvider(Path.Combine(Directory.GetCurrentDirectory(), "www")),
-    RequestPath = "/www"
+    RequestPath = ""
 });
 
 app.MapGet("/getWords", (int count, int appCode) =>
@@ -47,6 +54,9 @@ app.MapGet("/getWords", (int count, int appCode) =>
     {
         return Results.Unauthorized();
     }
+
+    // Reset client requests if it's a new day
+    ResetClientRequestsOnNewDay(clientUsage);
 
     // Make sure the client is allowed to make this request
     if (!APIRequestAllowed(appCode, count, clients, clientReg, clientUsage))
@@ -71,6 +81,9 @@ app.MapGet("/getParagraphs", (int count, int appCode) =>
     {
         return Results.Unauthorized();
     }
+
+    // Reset client requests if it's a new day
+    ResetClientRequestsOnNewDay(clientUsage);
 
     // Make sure the client is allowed to make this request
     // Paragraph requests count as 5 requests per paragraph.
@@ -255,6 +268,54 @@ app.MapGet("/clientLogin", () =>
     return Results.File(filePath, "text/html");
 }).WithName("ClientLogin");
 
+// Add an endpoint that get's client info by web code.
+app.MapPost("/getClientInfo", ([FromBody] ClientInfoRequest request) =>
+{
+    // Reset client requests if it's a new day
+    ResetClientRequestsOnNewDay(clientUsage);
+
+    // Find the client with the given account name
+    var client = clients.FirstOrDefault(c => string.Equals(c.AccountName, request.AccountName, StringComparison.OrdinalIgnoreCase));
+    // If not found, return unauthorized
+    if (client == null)
+    {
+        return Results.Unauthorized();
+    }
+    // Generate the web code for the given account details
+    var expectedWebCode = GetWebCode(client.AccountName,
+                                          DecryptString(client.AccountEmail, masterKey, masterIv),
+                                          DecryptString(client.AccountPassword, masterKey, masterIv)
+                                      );
+    // Compare the expected web code with the provided web code
+    if (expectedWebCode != request.WebCode)
+    {
+        return Results.Unauthorized();
+    }
+
+    // Get the client usage details for the client.
+    var usageDetails = clientUsage.FirstOrDefault(cu => cu.AppCode == client.AppCode);
+    var usedTokens = usageDetails != null ? usageDetails.CurrentDailyRequests : 0;
+
+    // Get the average tokens per request from the client usage history.
+    int totalTokens = client.RequestHistory.Sum(rh => rh.TokensUsed);
+    int totalRequests = client.RequestHistory.Count;
+    float averageTokensPerRequest = totalRequests > 0 ? (float)totalTokens / totalRequests : 0;
+
+    var clientInfo = new ClientInfo
+    {
+        AccountName = client.AccountName,
+        AccountEmail = DecryptString(client.AccountEmail, masterKey, masterIv),
+        AppCode = client.AppCode,
+        RegistrationDate = client.RegistrationDate,
+        RequestHistory = client.RequestHistory,
+        UsedTokens = usedTokens,
+        MaxDailyTokens = usageDetails != null ? usageDetails.MaxAllowedDailyRequests: 0,
+        AverageTokensPerRequest = averageTokensPerRequest
+    };
+
+    return Results.Ok(clientInfo);
+}).WithName("GetClientInfo");
+
 app.Run();
 
 static (string key, string iv) DecryptEncryptionDetails(EncryptionDetails encDetails, string masterKey, string masterIv)
@@ -382,7 +443,7 @@ static int GetWebCode(string accountName, string email, string password)
     if (password == null) throw new ArgumentNullException(nameof(password));
 
     // Get the combined string containing the given parameters.
-    var combined = $"{accountName}:{email}:{password}".ToLower();
+    var combined = $"{accountName.ToLower()}:{email.ToLower()}:{password.ToLower()}";
 
     // Return a hash code that can be re-created in JavaScript using the same string.
     // This is done by getting the SHA256 hash of the string, then taking the first 4 bytes
@@ -408,6 +469,19 @@ static void RecordRequestHistory(Client client, int tokensUsed, string[] words)
     if (client.RequestHistory.Count > 10)
     {
         client.RequestHistory = client.RequestHistory.Take(10).ToList();
+    }
+}
+
+static void ResetClientRequestsOnNewDay(List<ClientUsageDetails> clientUsage)
+{
+    var today = DateTime.UtcNow.Date;
+    foreach (var usage in clientUsage)
+    {
+        if (usage.FirstRequest == null || usage.FirstRequest.Value.Date < today)
+        {
+            usage.FirstRequest = DateTime.UtcNow;
+            usage.CurrentDailyRequests = 0;
+        }
     }
 }
 
@@ -468,4 +542,21 @@ public record RequestHistoryEntry
     public DateTime RequestTime { get; set; }
     public int TokensUsed { get; set; }
     public List<string> FirstWords { get; set; } = [];
+}
+
+public record ClientInfo {
+    public required string AccountName { get; set; }
+    public required string AccountEmail { get; set; }
+    public int AppCode { get; set; }
+    public DateTime RegistrationDate { get; set; }
+    public List<RequestHistoryEntry> RequestHistory { get; set; } = [];
+    public int UsedTokens { get; set; } = 0;
+    public int MaxDailyTokens { get; set; } = 0;
+    public float AverageTokensPerRequest { get; set; } = 0;
+}
+
+public record ClientInfoRequest
+{
+    public required string AccountName { get; set; }
+    public int WebCode { get; set; }
 }

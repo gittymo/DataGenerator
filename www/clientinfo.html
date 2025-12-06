@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Client Information</title>
+    <link rel="stylesheet" href="./global.css">
+    <script type="module">
+        import { CallRESTAPI } from "./utils.js";
+        import { readCookie } from "./utils.js";
+        import { eraseCookie } from "./utils.js";
+
+        document.addEventListener("DOMContentLoaded", async function () {
+            const clientNameElem = document.getElementById("clientName");
+            const clientEmailElem = document.getElementById("clientEmail");
+            const registeredDateElem = document.getElementById("registeredDate");
+            const transactionHistoryElem = document.getElementById("transactionHistory");
+            const accountDetailsElem = document.getElementById("accountDetails");
+            try {
+                const accountName = readCookie("AccountName");
+                const webCode = readCookie("WebCode");
+
+                // If cookies are missing, redirect to login
+                if (!accountName || !webCode) {
+                    // Make the page content invisible for a moment to avoid flicker
+                    document.body.style.visibility = "hidden";
+                    window.location.href = "/clientlogin.html";
+                    return;
+                }
+
+                var requestData = {
+                    AccountName: accountName,
+                    WebCode: parseInt(webCode, 10)
+                };
+                const data = await CallRESTAPI(
+                    "/getClientInfo",
+                    "POST",
+                    { body: requestData }
+                );
+                displayClientInfo(data);
+
+                function displayClientInfo(data) {
+                    clientNameElem.textContent = `Name: ${data.AccountName} (ID: ${data.AppCode})`;
+                    clientEmailElem.textContent = `Email: ${data.AccountEmail}`;
+                    registeredDateElem.textContent = `Registered On: ${new Date(data.RegistrationDate).toLocaleDateString()}`;
+
+                    // Display transaction history
+                    if (Array.isArray(data.RequestHistory) && data.RequestHistory.length > 0) {
+                        const historyList = document.createElement("ul");
+                        data.RequestHistory.forEach(entry => {
+                            const listItem = document.createElement("li");
+                            const dateStr = entry.RequestTime ? new Date(entry.RequestTime).toLocaleString() : "Unknown date";
+                            const tokens = entry.TokensUsed ?? entry.TokensUsed === 0 ? entry.TokensUsed : (entry.TokensUsed || entry.TokensUsed === 0 ? entry.TokensUsed : "N/A");
+                            // Get the first words.
+                            const firstWords = entry.FirstWords || "";
+                            listItem.textContent = `Date: ${dateStr}, Tokens Used: ${tokens}, Words: ${firstWords}`;
+                            historyList.appendChild(listItem);
+                        });
+                        transactionHistoryElem.appendChild(historyList);
+                    } else {
+                        transactionHistoryElem.textContent = "No transaction history available.";
+                    }
+
+                    // Display account details
+                    const avg = typeof data.AverageTokensPerRequest === 'number' ? data.AverageTokensPerRequest.toFixed(2) : '0.00';
+                    accountDetailsElem.innerHTML = `
+                        <p>Used Tokens Today: ${data.UsedTokens ?? 0}</p>
+                        <p>Max Daily Tokens: ${data.MaxDailyTokens ?? 0}</p>
+                        <p>Average Tokens Per Request: ${avg}</p>
+                    `;
+                }
+
+                document.getElementById("logout").addEventListener("click", function() {
+                    eraseCookie("AccountName");
+                    eraseCookie("WebCode");
+                    window.location.href = "/clientlogin.html";
+                });
+
+                function displayError(err) {
+                    clientNameElem.textContent = "Error fetching client information.";
+                }
+            } catch (error) {
+                clientNameElem.textContent = "An unexpected error occurred.";
+            }
+        });
+    </script>
+</head>
+<body>
+    <div id="ClientInfo" class="container">
+        <h1>Data Generator Client Usage Report</h1>
+        <h2 id="clientName"></h2>
+        <h2 id="clientEmail"></h2>
+        <h2 id="registeredDate"></h2>
+        <h3>Transaction History</h3>
+        <span id="transactionHistory"></span>
+        <h3>Account Details</h3>
+        <span id="accountDetails"></span>
+        <button id="logout">Logout</button>
+    </div>
+</body>
+</html>
