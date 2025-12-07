@@ -12,6 +12,7 @@ var builder = WebApplication.CreateBuilder(args);
 var clients = builder.Configuration.GetSection("Clients").Get<List<Client>>() ?? [];
 var clientReg = builder.Configuration.GetSection("ClientReg").Get<List<ClientRegistrationDetails>>() ?? [];
 var clientUsage = builder.Configuration.GetSection("ClientUsage").Get<List<ClientUsageDetails>>() ?? [];
+var requestHistory = builder.Configuration.GetSection("RequestHistory").Get<Dictionary<int,List<RequestHistoryEntry>>>() ?? [];
 var encryptionDetails = builder.Configuration.GetSection("Enc").Get<EncryptionDetails>() ?? throw new Exception("Enc section not found in appsettings.json");
 
 const string masterKey = "XE3kSJJRPNY9zDqyGpsNH2kAapZbYko1OqNYqp0voSw=";
@@ -59,7 +60,7 @@ app.MapGet("/getWords", (int count, int appCode) =>
     ResetClientRequestsOnNewDay(clientUsage);
 
     // Make sure the client is allowed to make this request
-    if (!APIRequestAllowed(appCode, count, clients, clientReg, clientUsage))
+    if (!APIRequestAllowed(appCode, count, clients, clientReg, clientUsage, requestHistory))
     {
         return Results.StatusCode(429); // Too Many Requests
     }
@@ -67,8 +68,8 @@ app.MapGet("/getWords", (int count, int appCode) =>
     var words = lgen.GenerateWords(count);
 
     // Record the request in the client's request history
-    RecordRequestHistory(client, count, words);
-    UpdateClientsFile(clients, clientReg, clientUsage);
+    RecordRequestHistory(client, count, words, requestHistory);
+    UpdateClientsFile(clients, clientReg, clientUsage, requestHistory);
     return Results.Ok(words);
 })
 .WithName("GetWords");
@@ -87,7 +88,7 @@ app.MapGet("/getParagraphs", (int count, int appCode) =>
 
     // Make sure the client is allowed to make this request
     // Paragraph requests count as 5 requests per paragraph.
-    if (!APIRequestAllowed(appCode, count * 5, clients, clientReg, clientUsage))
+    if (!APIRequestAllowed(appCode, count * 5, clients, clientReg, clientUsage, requestHistory))
     {
         return Results.StatusCode(429); // Too Many Requests
     }
@@ -95,8 +96,8 @@ app.MapGet("/getParagraphs", (int count, int appCode) =>
     var paragraphs = lgen.GenerateParagraphs(count);
 
     // Record the request in the client's request history
-    RecordRequestHistory(client, count * 5, [.. paragraphs.SelectMany(p => p.Split(' '))]);
-    UpdateClientsFile(clients, clientReg, clientUsage);
+    RecordRequestHistory(client, count * 5, [.. paragraphs.SelectMany(p => p.Split(' '))], requestHistory);
+    UpdateClientsFile(clients, clientReg, clientUsage, requestHistory);
     return Results.Ok(paragraphs);
 })
 .WithName("GetParagraphs");
@@ -127,7 +128,7 @@ app.MapPost("/registerClient", ([FromBody] RegisterClientRequest client) =>
     clientReg.Add(regDetails);
 
     // Save to appsettings.json
-    UpdateClientsFile(clients, clientReg, clientUsage);
+    UpdateClientsFile(clients, clientReg, clientUsage, requestHistory);
 
     return Results.Ok(new RegisterClientConfirmation { Code = regCode });
 }).WithName("RegisterClient");
@@ -147,7 +148,7 @@ app.MapGet("/updateRegistrationCode", (int oldCode) =>
     regDetails.RegistrationCodeExpiresAt = DateTime.UtcNow.AddMinutes(15);
 
     // Save to appsettings.json
-    UpdateClientsFile(clients, clientReg, clientUsage);
+    UpdateClientsFile(clients, clientReg, clientUsage, requestHistory);
 
     return Results.Ok(new RegisterClientConfirmation { Code = newCode });
 }).WithName("UpdateRegistrationCode");
@@ -162,7 +163,7 @@ app.MapPost("/confirmClientRegistration", ([FromBody] RegisterClientConfirmation
     if (regDetails == null || regDetails.RegistrationCodeExpiresAt < DateTime.UtcNow)
     {
         // Save to appsettings.json
-        UpdateClientsFile(clients, clientReg, clientUsage);
+        UpdateClientsFile(clients, clientReg, clientUsage, requestHistory);
 
         return Results.NotFound("Invalid or expired registration code.");
     }
@@ -182,7 +183,7 @@ app.MapPost("/confirmClientRegistration", ([FromBody] RegisterClientConfirmation
     clientReg.Remove(regDetails);
 
     // Save to appsettings.json
-    UpdateClientsFile(clients, clientReg, clientUsage);
+    UpdateClientsFile(clients, clientReg, clientUsage, requestHistory);
 
     return Results.Ok(new { AppCode = client.AppCode });
 
@@ -227,7 +228,7 @@ app.MapPost("/deregisterClient", ([FromBody] DeregisterClientRequest req) =>
     }
 
     // Save to appsettings.json
-    UpdateClientsFile(clients, clientReg, clientUsage);
+    UpdateClientsFile(clients, clientReg, clientUsage, requestHistory);
 
     return Results.Ok("Client deregistered successfully.");
 }).WithName("DeregisterClient");
@@ -296,9 +297,12 @@ app.MapPost("/getClientInfo", ([FromBody] ClientInfoRequest request) =>
     var usageDetails = clientUsage.FirstOrDefault(cu => cu.AppCode == client.AppCode);
     var usedTokens = usageDetails != null ? usageDetails.CurrentDailyRequests : 0;
 
+    // Get the request history list for th client.
+    var requests = requestHistory.ContainsKey(client.AppCode) ? requestHistory[client.AppCode] : [];
+
     // Get the average tokens per request from the client usage history.
-    int totalTokens = client.RequestHistory.Sum(rh => rh.TokensUsed);
-    int totalRequests = client.RequestHistory.Count;
+    int totalTokens = requests.Sum(rh => rh.TokensUsed);
+    int totalRequests = requests.Count;
     float averageTokensPerRequest = totalRequests > 0 ? (float)totalTokens / totalRequests : 0;
 
     var clientInfo = new ClientInfo
@@ -307,7 +311,7 @@ app.MapPost("/getClientInfo", ([FromBody] ClientInfoRequest request) =>
         AccountEmail = DecryptString(client.AccountEmail, masterKey, masterIv),
         AppCode = client.AppCode,
         RegistrationDate = client.RegistrationDate,
-        RequestHistory = client.RequestHistory,
+        RequestHistory = requests,
         UsedTokens = usedTokens,
         MaxDailyTokens = usageDetails != null ? usageDetails.MaxAllowedDailyRequests: 0,
         AverageTokensPerRequest = averageTokensPerRequest
@@ -376,7 +380,7 @@ static string DecryptString(string cipherText, string key, string iv, Encryption
     return sr.ReadToEnd();
 }
 
-static void UpdateClientsFile(List<Client> clients, List<ClientRegistrationDetails> clientReg, List<ClientUsageDetails> clientUsage)
+static void UpdateClientsFile(List<Client> clients, List<ClientRegistrationDetails> clientReg, List<ClientUsageDetails> clientUsage, Dictionary<int, List<RequestHistoryEntry>> requestHistory)
 {
     var configFile = "appsettings.json";
     var json = System.IO.File.ReadAllText(configFile);
@@ -384,6 +388,7 @@ static void UpdateClientsFile(List<Client> clients, List<ClientRegistrationDetai
     jObject["Clients"] = JArray.FromObject(clients);
     jObject["ClientUsage"] = JArray.FromObject(clientUsage);
     jObject["ClientReg"] = JArray.FromObject(clientReg);
+    jObject["RequestHistory"] = JObject.FromObject(requestHistory);
     System.IO.File.WriteAllText(configFile, jObject.ToString(Formatting.Indented));
 }
 
@@ -393,7 +398,7 @@ static int GenerateAppCode()
     return rand.Next(100000, 999999);
 }
 
-static bool APIRequestAllowed(int appCode, int tokensToUse, List<Client> clients, List<ClientRegistrationDetails> clientReg, List<ClientUsageDetails> clientUsage)
+static bool APIRequestAllowed(int appCode, int tokensToUse, List<Client> clients, List<ClientRegistrationDetails> clientReg, List<ClientUsageDetails> clientUsage, Dictionary<int, List<RequestHistoryEntry>> requestHistory)
 {
     // Get the client usage details for the given appCode
     // If not found, create a new entry with default values
@@ -428,7 +433,7 @@ static bool APIRequestAllowed(int appCode, int tokensToUse, List<Client> clients
     {
         clientUsageDetails.CurrentDailyRequests += tokensToUse;
         // Update the clients file with the new request count
-        UpdateClientsFile(clients, clientReg, clientUsage);
+        UpdateClientsFile(clients, clientReg, clientUsage, requestHistory);
     }
 
     return true;
@@ -453,22 +458,30 @@ static int GetWebCode(string accountName, string email, string password)
     return BitConverter.ToInt32(hash, 0);
 }
 
-static void RecordRequestHistory(Client client, int tokensUsed, string[] words)
+static void RecordRequestHistory(Client client, int tokensUsed, string[] words, Dictionary<int, List<RequestHistoryEntry>> requestHistory)
 {
     // Break the firstWords into a list of strings. Remove any punctuation.
     var firstWords = words.Take(5).ToList();
 
-    client.RequestHistory.Insert(0, new RequestHistoryEntry
+    var reqHist = new RequestHistoryEntry
     {
         RequestTime = DateTime.UtcNow,
         TokensUsed = tokensUsed,
         FirstWords = firstWords
-    });
-
-    // Keep only the last 10 entries
-    if (client.RequestHistory.Count > 10)
+    };
+    
+    var clientAppCode = client.AppCode;
+    requestHistory.TryGetValue(clientAppCode, out var historyList);
+    if (historyList == null)
     {
-        client.RequestHistory = client.RequestHistory.Take(10).ToList();
+        historyList = [];
+        requestHistory[clientAppCode] = historyList;
+    }
+
+    historyList.Insert(0, reqHist);
+    if (historyList.Count > 5)
+    {
+        historyList.RemoveRange(5, historyList.Count - 5);
     }
 }
 
@@ -502,7 +515,6 @@ public record RegisterClientConfirmation
 public record Client : RegisterClientRequest
 {
     public int AppCode { get; set; }
-    public List<RequestHistoryEntry> RequestHistory { get; set; } = [];
 }
 
 public record ClientRegistrationDetails : RegisterClientRequest
