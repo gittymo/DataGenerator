@@ -4,6 +4,7 @@ using Newtonsoft.Json.Linq;
 using System.Security.Cryptography;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.FileProviders;
+using DataProvider;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -13,7 +14,7 @@ var clients = builder.Configuration.GetSection("Clients").Get<List<Client>>() ??
 var clientReg = builder.Configuration.GetSection("ClientReg").Get<List<ClientRegistrationDetails>>() ?? [];
 var clientUsage = builder.Configuration.GetSection("ClientUsage").Get<List<ClientUsageDetails>>() ?? [];
 var requestHistory = builder.Configuration.GetSection("RequestHistory").Get<Dictionary<int,List<RequestHistoryEntry>>>() ?? [];
-var encryptionDetails = builder.Configuration.GetSection("Enc").Get<EncryptionDetails>() ?? throw new Exception("Enc section not found in appsettings.json");
+var encryptionHelper = new EncryptionHelper(builder.Configuration);
 
 const string masterKey = "XE3kSJJRPNY9zDqyGpsNH2kAapZbYko1OqNYqp0voSw=";
 const string masterIv = "7l++7FEGWs+tjCGxz8RGYQ==";
@@ -120,8 +121,8 @@ app.MapPost("/registerClient", ([FromBody] RegisterClientRequest client) =>
     var regDetails = new ClientRegistrationDetails
     {
         AccountName = client.AccountName,
-        AccountEmail = EncryptString(client.AccountEmail, masterKey, masterIv),
-        AccountPassword = EncryptString(client.AccountPassword, masterKey, masterIv),
+        AccountEmail = encryptionHelper.EncryptString(client.AccountEmail),
+        AccountPassword = encryptionHelper.EncryptString(client.AccountPassword),
         RegistrationCode = regCode,
         RegistrationCodeExpiresAt = DateTime.UtcNow.AddMinutes(15)
     };
@@ -189,21 +190,6 @@ app.MapPost("/confirmClientRegistration", ([FromBody] RegisterClientConfirmation
 
 }).WithName("ConfirmClientRegistration");
 
-app.MapGet("/enc", () =>
-{
-    using Aes aes = Aes.Create();
-    aes.GenerateKey();
-    aes.GenerateIV();
-
-    var encDetails = new EncryptionDetails
-    {
-        key = EncryptString(Convert.ToBase64String(aes.Key), masterKey, masterIv),
-        iv = EncryptString(Convert.ToBase64String(aes.IV), masterKey, masterIv)
-    };
-
-    return Results.Ok(encDetails);
-}).WithName("GetEnc");
-
 app.MapPost("/deregisterClient", ([FromBody] DeregisterClientRequest req) =>
 {
     var client = clients.FirstOrDefault(c => c.AppCode == req.AppCode);
@@ -212,7 +198,7 @@ app.MapPost("/deregisterClient", ([FromBody] DeregisterClientRequest req) =>
         return Results.NotFound("Client not found.");
     }
 
-    var decryptedPassword = DecryptString(client.AccountPassword, masterKey, masterIv);
+    var decryptedPassword = encryptionHelper.DecryptString(client.AccountPassword);
     if (decryptedPassword != req.Password)
     {
         return Results.Unauthorized();
@@ -244,8 +230,8 @@ app.MapPost("/webClientLoginAllowed", ([FromBody] WebClientLogin login) =>
     }
     // Generate the web code for the given account details
     var expectedWebCode = GetWebCode(client.AccountName,
-                                          DecryptString(client.AccountEmail, masterKey, masterIv),
-                                          DecryptString(client.AccountPassword, masterKey, masterIv)
+                                          encryptionHelper.DecryptString(client.AccountEmail),
+                                          encryptionHelper.DecryptString(client.AccountPassword)
                                       );
     // Compare the expected web code with the provided web code
     if (expectedWebCode != login.WebCode)
@@ -284,8 +270,8 @@ app.MapPost("/getClientInfo", ([FromBody] ClientInfoRequest request) =>
     }
     // Generate the web code for the given account details
     var expectedWebCode = GetWebCode(client.AccountName,
-                                          DecryptString(client.AccountEmail, masterKey, masterIv),
-                                          DecryptString(client.AccountPassword, masterKey, masterIv)
+                                          encryptionHelper.DecryptString(client.AccountEmail),
+                                          encryptionHelper.DecryptString(client.AccountPassword)
                                       );
     // Compare the expected web code with the provided web code
     if (expectedWebCode != request.WebCode)
@@ -308,7 +294,7 @@ app.MapPost("/getClientInfo", ([FromBody] ClientInfoRequest request) =>
     var clientInfo = new ClientInfo
     {
         AccountName = client.AccountName,
-        AccountEmail = DecryptString(client.AccountEmail, masterKey, masterIv),
+        AccountEmail = encryptionHelper.DecryptString(client.AccountEmail),
         AppCode = client.AppCode,
         RegistrationDate = client.RegistrationDate,
         RequestHistory = requests,
@@ -321,64 +307,6 @@ app.MapPost("/getClientInfo", ([FromBody] ClientInfoRequest request) =>
 }).WithName("GetClientInfo");
 
 app.Run();
-
-static (string key, string iv) DecryptEncryptionDetails(EncryptionDetails encDetails, string masterKey, string masterIv)
-{
-    ArgumentNullException.ThrowIfNull(encDetails);
-    ArgumentNullException.ThrowIfNull(masterKey);
-    ArgumentNullException.ThrowIfNull(masterIv);
-
-    var key = DecryptString(encDetails.key, masterKey, masterIv);
-    var iv = DecryptString(encDetails.iv, masterKey, masterIv);
-    return (key, iv);
-}
-
-static string EncryptString(string str, string key, string iv, EncryptionDetails? encDetails = null)
-{
-    ArgumentNullException.ThrowIfNull(str);
-    ArgumentNullException.ThrowIfNull(key);
-    ArgumentNullException.ThrowIfNull(iv);
-
-    // If encDetails is provided, decrypt key and iv from it
-    if (encDetails != null)
-    {
-        (key, iv) = DecryptEncryptionDetails(encDetails, masterKey, masterIv);
-    }
-
-    using Aes aes = Aes.Create();
-    aes.Key = Convert.FromBase64String(key);
-    aes.IV = Convert.FromBase64String(iv);
-    using var encryptor = aes.CreateEncryptor(aes.Key, aes.IV);
-    using var ms = new MemoryStream();
-    using (var cs = new CryptoStream(ms, encryptor, CryptoStreamMode.Write))
-    {
-        using var sw = new StreamWriter(cs);
-        sw.Write(str);
-    }
-    return Convert.ToBase64String(ms.ToArray());
-}
-
-static string DecryptString(string cipherText, string key, string iv, EncryptionDetails? encDetails = null)
-{
-    ArgumentNullException.ThrowIfNull(cipherText);
-    ArgumentNullException.ThrowIfNull(key);
-    ArgumentNullException.ThrowIfNull(iv);
-
-    // If encDetails is provided, decrypt key and iv from it
-    if (encDetails != null)
-    {
-        (key, iv) = DecryptEncryptionDetails(encDetails, masterKey, masterIv);
-    }
-
-    using Aes aes = Aes.Create();
-    aes.Key = Convert.FromBase64String(key);
-    aes.IV = Convert.FromBase64String(iv);
-    using var decryptor = aes.CreateDecryptor(aes.Key, aes.IV);
-    using var ms = new MemoryStream(Convert.FromBase64String(cipherText));
-    using var cs = new CryptoStream(ms, decryptor, CryptoStreamMode.Read);
-    using var sr = new StreamReader(cs);
-    return sr.ReadToEnd();
-}
 
 static void UpdateClientsFile(List<Client> clients, List<ClientRegistrationDetails> clientReg, List<ClientUsageDetails> clientUsage, Dictionary<int, List<RequestHistoryEntry>> requestHistory)
 {
@@ -531,11 +459,7 @@ public record ClientUsageDetails
     public int CurrentDailyRequests { get; set; }
 }
 
-public record EncryptionDetails
-{
-    public required string key { get; set; }
-    public required string iv { get; set; }
-}
+
 
 public record DeregisterClientRequest
 {
